@@ -1,13 +1,18 @@
 mod command_handler;
 mod message_handler;
+mod ai_utils;
+mod parser;
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use dotenv::dotenv;
 use anyhow::Result;
 use log::info;
 use teloxide::prelude::*;
+use tokio::sync::Mutex;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use crate::command_handler::{command_handler, EnhancerCommands};
-use crate::message_handler::message_handler;
+use crate::message_handler::{AppState, message_handler};
 
 
 #[tokio::main]
@@ -26,7 +31,9 @@ async fn main() -> Result<()> {
 
     let bot = Bot::from_env();
 
-    // let app_state = Arc::new(AppState::default());
+    let app_state = Arc::new(AppState {
+        user_state: Mutex::new(HashMap::new()),
+    });
 
     let cmd_handler = Update::filter_message()
         .filter_command::<EnhancerCommands>()
@@ -37,7 +44,7 @@ async fn main() -> Result<()> {
     let handler = dptree::entry().branch(cmd_handler).branch(chat_handler);
 
     Dispatcher::builder(bot.clone(), handler)
-        // .dependencies(dptree::deps![app_state])
+        .dependencies(dptree::deps![app_state])
         .enable_ctrlc_handler()
         .build()
         .dispatch_with_listener(
