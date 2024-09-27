@@ -1,14 +1,14 @@
+use crate::ai_utils::{core_llm_engine, llm_engine, llm_engine_json};
+use crate::parser::{update_request_structure, RequestStructure, UserProfile};
+use chrono::Local;
+use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::sync::Arc;
-use serde_json::Value;
-use teloxide::Bot;
 use teloxide::prelude::{ChatId, Message, Requester};
-use tracing::info;
-use crate::ai_utils::{core_llm_engine, llm_engine, llm_engine_json};
-use crate::parser::{RequestStructure, update_request_structure, UserProfile};
-use chrono::Local;
+use teloxide::Bot;
 use tokio::sync::Mutex;
+use tracing::info;
 
 pub(crate) async fn message_handler(
     bot: Bot,
@@ -16,11 +16,15 @@ pub(crate) async fn message_handler(
     app_state: Arc<AppState>,
 ) -> anyhow::Result<()> {
     create_structured_request(bot, msg, app_state).await?;
-    
+
     Ok(())
 }
 
-pub(crate) async fn create_structured_request (bot: Bot, msg: Message, app_state: Arc<AppState>) -> anyhow::Result<()> {
+pub(crate) async fn create_structured_request(
+    bot: Bot,
+    msg: Message,
+    app_state: Arc<AppState>,
+) -> anyhow::Result<()> {
     let user_request = msg.text().unwrap().to_string();
 
     let mut user_states = app_state.user_state.lock().await;
@@ -29,8 +33,10 @@ pub(crate) async fn create_structured_request (bot: Bot, msg: Message, app_state
         dialogue_cache: DialogueCache::new(),
     });
 
-    user_state.dialogue_cache.add_user_message(user_request.clone());
-    
+    user_state
+        .dialogue_cache
+        .add_user_message(user_request.clone());
+
     let mut request_structure = RequestStructure {
         request: String::new(),
         cache: vec![],
@@ -41,23 +47,24 @@ pub(crate) async fn create_structured_request (bot: Bot, msg: Message, app_state
             communication_style: String::new(),
         },
     };
-    
+
     // Step 1. Updating structure with user_request
     update_request_structure(&mut request_structure, "request", Some(&user_request)).await;
 
     // Check if we have proper JSON-structure
     let json_output_1 = serde_json::to_string_pretty(&request_structure).unwrap();
     info!("JSON str. after updating request: {}", json_output_1);
-    
+
     // Step 1.5. Updating structure with cache
     let dialogue_context = user_state.dialogue_cache.to_string();
     update_request_structure(&mut request_structure, "cache", Some(&dialogue_context)).await;
-    
+
     // Step 2. Updating structure with context
     let system_role_for_context = fs::read_to_string("common_res/system_role_for_context.txt")
         .map_err(|e| format!("Failed to read 'system role': {}", e))
         .unwrap();
-    let llm_response = llm_engine(system_role_for_context.to_string(), user_request.clone()).await?;
+    let llm_response =
+        llm_engine(system_role_for_context.to_string(), user_request.clone()).await?;
 
     update_request_structure(&mut request_structure, "context", Some(&llm_response)).await;
 
@@ -66,24 +73,33 @@ pub(crate) async fn create_structured_request (bot: Bot, msg: Message, app_state
     info!("JSON str. after adding context: {}", json_output_2);
 
     // Step 3. Updating structure with viewpoints array
-    
-    let system_role_for_viewpoints = fs::read_to_string("common_res/system_role_for_viewpoints.txt")
-        .map_err(|e| format!("Failed to read 'system role': {}", e))
-        .unwrap();
-    let llm_response = llm_engine_json(system_role_for_viewpoints.to_string(), user_request.clone()).await?;
+
+    let system_role_for_viewpoints =
+        fs::read_to_string("common_res/system_role_for_viewpoints.txt")
+            .map_err(|e| format!("Failed to read 'system role': {}", e))
+            .unwrap();
+    let llm_response =
+        llm_engine_json(system_role_for_viewpoints.to_string(), user_request.clone()).await?;
 
     let parsed_response: Value = serde_json::from_str(&llm_response)?;
     if let Some(viewpoints_array) = parsed_response.get("viewpoints") {
         if let Some(viewpoints_vec) = viewpoints_array.as_array() {
             // Extracting strings from the array and generate the required JSON
-            let viewpoints: Vec<String> = viewpoints_vec.iter()
+            let viewpoints: Vec<String> = viewpoints_vec
+                .iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_string())) // Extracting strings from an array
                 .collect();
             // Form a string in the required format
-            let generated_viewpoints = serde_json::to_string(&viewpoints).unwrap_or_else(|_| r#"[]"#.to_string());
+            let generated_viewpoints =
+                serde_json::to_string(&viewpoints).unwrap_or_else(|_| r#"[]"#.to_string());
 
             //  Updating structure with viewpoints
-            update_request_structure(&mut request_structure, "viewpoints", Some(&generated_viewpoints)).await;
+            update_request_structure(
+                &mut request_structure,
+                "viewpoints",
+                Some(&generated_viewpoints),
+            )
+            .await;
         }
     }
 
@@ -92,34 +108,53 @@ pub(crate) async fn create_structured_request (bot: Bot, msg: Message, app_state
     info!("JSON str. after adding viewpoints: {}", json_output_3);
 
     // Step 4. Updating structure with user_profile (expertise level and communication style)
-    let system_role_for_user_profile = fs::read_to_string("common_res/system_role_for_user_profile.txt")
-        .map_err(|e| format!("Failed to read 'system role': {}", e))
-        .unwrap();
-    let llm_response = llm_engine_json(system_role_for_user_profile.to_string(), user_request.clone()).await?;
+    let system_role_for_user_profile =
+        fs::read_to_string("common_res/system_role_for_user_profile.txt")
+            .map_err(|e| format!("Failed to read 'system role': {}", e))
+            .unwrap();
+    let llm_response = llm_engine_json(
+        system_role_for_user_profile.to_string(),
+        user_request.clone(),
+    )
+    .await?;
 
     let parsed_response: Value = serde_json::from_str(&llm_response)?;
-    if let Some(expertise) = parsed_response.get("expertise_lvl").and_then(|v| v.as_str()) {
+    if let Some(expertise) = parsed_response
+        .get("expertise_lvl")
+        .and_then(|v| v.as_str())
+    {
         update_request_structure(&mut request_structure, "expertise_lvl", Some(expertise)).await;
     }
-    if let Some(style) = parsed_response.get("communication_style").and_then(|v| v.as_str()) {
+    if let Some(style) = parsed_response
+        .get("communication_style")
+        .and_then(|v| v.as_str())
+    {
         update_request_structure(&mut request_structure, "communication_style", Some(style)).await;
     }
 
     // Check if we have proper JSON-structure
     let json_output_4 = serde_json::to_string_pretty(&request_structure).unwrap();
     info!("Final JSON after adding user_profile: {}", json_output_4);
-    
+
     // Step 5. Updating structure with cache
-    
+
     let dialogue_context = user_state.dialogue_cache.to_vec();
     info!("cache: {:?}", dialogue_context);
-    update_request_structure(&mut request_structure, "cache", Some(&serde_json::to_string(&dialogue_context)?)).await;
+    update_request_structure(
+        &mut request_structure,
+        "cache",
+        Some(&serde_json::to_string(&dialogue_context)?),
+    )
+    .await;
 
     let json_output_5 = serde_json::to_string_pretty(&request_structure).unwrap();
     info!("Final JSON after adding user_profile: {}", json_output_5);
-    
-    let final_response = core_llm_engine("Ответь на запрос".to_string(), &request_structure).await?;
-    user_state.dialogue_cache.update_last_response(final_response.clone());
+
+    let final_response =
+        core_llm_engine("Ответь на запрос".to_string(), &request_structure).await?;
+    user_state
+        .dialogue_cache
+        .update_last_response(final_response.clone());
     bot.send_message(msg.chat.id, final_response).await?;
     Ok(())
 }

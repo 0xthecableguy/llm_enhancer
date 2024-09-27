@@ -15,7 +15,6 @@ pub struct UserProfile {
     pub communication_style: String,
 }
 
-
 pub(crate) async fn update_request_structure(
     request_structure: &mut RequestStructure,
     field: &str,

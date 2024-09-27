@@ -1,9 +1,9 @@
-use teloxide::Bot;
-use teloxide::macros::BotCommands;
-use teloxide::prelude::{Message, Requester};
 use anyhow::Result;
+use teloxide::macros::BotCommands;
 use teloxide::payloads::SendMessageSetters;
+use teloxide::prelude::{Message, Requester};
 use teloxide::types::ParseMode;
+use teloxide::Bot;
 use tracing::info;
 
 #[derive(BotCommands, Clone)]
@@ -12,11 +12,7 @@ pub enum EnhancerCommands {
     Start,
 }
 
-pub(crate) async fn command_handler(
-    bot: Bot,
-    msg: Message,
-    cmd: EnhancerCommands,
-) -> Result<()> {
+pub(crate) async fn command_handler(bot: Bot, msg: Message, cmd: EnhancerCommands) -> Result<()> {
     info!("fn command_handler: got command");
     let user_id = msg.from.as_ref().map(|user| user.id.0).unwrap_or(0);
 
@@ -27,5 +23,5 @@ pub(crate) async fn command_handler(
                 .await?;
         }
     }
-    Ok (())
+    Ok(())
 }

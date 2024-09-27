@@ -1,19 +1,18 @@
+mod ai_utils;
 mod command_handler;
 mod message_handler;
-mod ai_utils;
 mod parser;
 
+use crate::command_handler::{command_handler, EnhancerCommands};
+use crate::message_handler::{message_handler, AppState};
+use anyhow::Result;
+use dotenv::dotenv;
+use log::info;
 use std::collections::HashMap;
 use std::sync::Arc;
-use dotenv::dotenv;
-use anyhow::Result;
-use log::info;
 use teloxide::prelude::*;
 use tokio::sync::Mutex;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
-use crate::command_handler::{command_handler, EnhancerCommands};
-use crate::message_handler::{AppState, message_handler};
-
 
 #[tokio::main]
 async fn main() -> Result<()> {
