@@ -55,11 +55,45 @@ pub(crate) async fn create_structured_request(
     let json_output_1 = serde_json::to_string_pretty(&request_structure).unwrap();
     info!("JSON str. after updating request: {}", json_output_1);
 
-    // Step 1.5. Updating structure with cache
-    let dialogue_context = user_state.dialogue_cache.to_string();
-    update_request_structure(&mut request_structure, "cache", Some(&dialogue_context)).await;
+    // Step 2. Updating structure with cache
+    let dialogue_context = user_state.dialogue_cache.to_vec();
+    update_request_structure(
+        &mut request_structure,
+        "cache",
+        Some(&serde_json::to_string(&dialogue_context)?),
+    )
+        .await;
+    
+    // Step 3. Updating structure with user_profile (expertise level and communication style)
+    let system_role_for_user_profile =
+        fs::read_to_string("common_res/system_role_for_user_profile.txt")
+            .map_err(|e| format!("Failed to read 'system role': {}", e))
+            .unwrap();
+    let llm_response = llm_engine_json(
+        system_role_for_user_profile.to_string(),
+        user_request.clone(),
+    )
+        .await?;
 
-    // Step 2. Updating structure with context
+    let parsed_response: Value = serde_json::from_str(&llm_response)?;
+    if let Some(expertise) = parsed_response
+        .get("expertise_lvl")
+        .and_then(|v| v.as_str())
+    {
+        update_request_structure(&mut request_structure, "expertise_lvl", Some(expertise)).await;
+    }
+    if let Some(style) = parsed_response
+        .get("communication_style")
+        .and_then(|v| v.as_str())
+    {
+        update_request_structure(&mut request_structure, "communication_style", Some(style)).await;
+    }
+
+    // Check if we have proper JSON-structure
+    let json_output_3 = serde_json::to_string_pretty(&request_structure).unwrap();
+    info!("Final JSON after adding user_profile: {}", json_output_3);
+    
+    // Step 4. Updating structure with context
     let system_role_for_context = fs::read_to_string("common_res/system_role_for_context.txt")
         .map_err(|e| format!("Failed to read 'system role': {}", e))
         .unwrap();
@@ -69,10 +103,10 @@ pub(crate) async fn create_structured_request(
     update_request_structure(&mut request_structure, "context", Some(&llm_response)).await;
 
     // Check if we have proper JSON-structure
-    let json_output_2 = serde_json::to_string_pretty(&request_structure).unwrap();
-    info!("JSON str. after adding context: {}", json_output_2);
+    let json_output_4 = serde_json::to_string_pretty(&request_structure).unwrap();
+    info!("JSON str. after adding context: {}", json_output_4);
 
-    // Step 3. Updating structure with viewpoints array
+    // Step 5. Updating structure with viewpoints array
 
     let system_role_for_viewpoints =
         fs::read_to_string("common_res/system_role_for_viewpoints.txt")
@@ -104,39 +138,10 @@ pub(crate) async fn create_structured_request(
     }
 
     // Check if we have proper JSON-structure
-    let json_output_3 = serde_json::to_string_pretty(&request_structure).unwrap();
-    info!("JSON str. after adding viewpoints: {}", json_output_3);
+    let json_output_5 = serde_json::to_string_pretty(&request_structure).unwrap();
+    info!("JSON str. after adding viewpoints: {}", json_output_5);
 
-    // Step 4. Updating structure with user_profile (expertise level and communication style)
-    let system_role_for_user_profile =
-        fs::read_to_string("common_res/system_role_for_user_profile.txt")
-            .map_err(|e| format!("Failed to read 'system role': {}", e))
-            .unwrap();
-    let llm_response = llm_engine_json(
-        system_role_for_user_profile.to_string(),
-        user_request.clone(),
-    )
-    .await?;
-
-    let parsed_response: Value = serde_json::from_str(&llm_response)?;
-    if let Some(expertise) = parsed_response
-        .get("expertise_lvl")
-        .and_then(|v| v.as_str())
-    {
-        update_request_structure(&mut request_structure, "expertise_lvl", Some(expertise)).await;
-    }
-    if let Some(style) = parsed_response
-        .get("communication_style")
-        .and_then(|v| v.as_str())
-    {
-        update_request_structure(&mut request_structure, "communication_style", Some(style)).await;
-    }
-
-    // Check if we have proper JSON-structure
-    let json_output_4 = serde_json::to_string_pretty(&request_structure).unwrap();
-    info!("Final JSON after adding user_profile: {}", json_output_4);
-
-    // Step 5. Updating structure with cache
+    // Step 6. Updating structure with cache
 
     let dialogue_context = user_state.dialogue_cache.to_vec();
     info!("cache: {:?}", dialogue_context);
@@ -147,15 +152,23 @@ pub(crate) async fn create_structured_request(
     )
     .await;
 
-    let json_output_5 = serde_json::to_string_pretty(&request_structure).unwrap();
-    info!("Final JSON after adding user_profile: {}", json_output_5);
+    let json_output_6 = serde_json::to_string_pretty(&request_structure).unwrap();
+    info!("Final JSON after adding user_profile: {}", json_output_6);
 
+    // Main processing of the request by the core_llm_engine fn
+    let system_role_for_core_llm_engine =
+        fs::read_to_string("common_res/system_role_for_core_llm_engine.txt")
+            .map_err(|e| format!("Failed to read 'system role': {}", e))
+            .unwrap();
     let final_response =
-        core_llm_engine("Ответь на запрос".to_string(), &request_structure).await?;
+        core_llm_engine(system_role_for_core_llm_engine, &request_structure).await?;
+    
     user_state
         .dialogue_cache
         .update_last_response(final_response.clone());
+    
     bot.send_message(msg.chat.id, final_response).await?;
+    
     Ok(())
 }
 
@@ -211,18 +224,18 @@ impl DialogueCache {
         }
     }
 
-    fn to_string(&self) -> String {
-        self.messages
-            .iter()
-            .map(|interaction| {
-                format!(
-                    "[{}] User: {}\nAssistant: {}",
-                    interaction.timestamp, interaction.user_request, interaction.llm_response
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    }
+    // fn to_string(&self) -> String {
+    //     self.messages
+    //         .iter()
+    //         .map(|interaction| {
+    //             format!(
+    //                 "[{}] User: {}\nAssistant: {}",
+    //                 interaction.timestamp, interaction.user_request, interaction.llm_response
+    //             )
+    //         })
+    //         .collect::<Vec<_>>()
+    //         .join("\n\n")
+    // }
     fn to_vec(&self) -> Vec<String> {
         self.messages
             .iter()
